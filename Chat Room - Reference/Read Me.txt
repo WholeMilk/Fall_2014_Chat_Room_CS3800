@@ -1,0 +1,5 @@
+--To Compile--
+gcc server.c -o server -lnsl -pthread
+gcc client.c -o client -lnsl -pthread
+
+Accepts /part, /quit, and /exit
