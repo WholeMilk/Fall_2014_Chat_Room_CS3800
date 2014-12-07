@@ -11,7 +11,7 @@
 
 /* gcc server.c -o server -lnsl -pthread */
 
-#define SERVER_PORT 63122
+#define SERVER_PORT 7777
 #define MAX_CLIENT 10
 #define BUFFER_SIZE 512
 
@@ -200,10 +200,10 @@ void *client_handler(void * client)
 		else
 		{
 			//if the client is ready to exit...
-			if ((strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/part") == 0))
+			if ((strcmp(clients[client_index].m_buffer, "/quit") == 0) || (strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/part") == 0))
 			{
 				//send the client the exit directive, helps client cleanly leave
-				write(clients[client_index].m_fd, "/directive -> exit", BUFFER_SIZE);
+				write(clients[client_index].m_fd, "/__quit", BUFFER_SIZE);
 				//tell all other clients that the user is leaving the server
 				client_is_leaving(&clients[client_index]);
 				//free up that client's spot in the clients[] array
@@ -289,7 +289,7 @@ void signalhandler(int sig)
 	}
 	while((cur_time - start_time) < 10);
 	
-	strncpy(msg, "/directive -> exit", BUFFER_SIZE);//the exit direcitve
+	strncpy(msg, "/__quit", BUFFER_SIZE);//the exit direcitve
 	//send all active clients the exit directive
 	for (i = 0; i < MAX_CLIENT; i++)
 	{
@@ -303,7 +303,7 @@ void signalhandler(int sig)
 	//stop threads for all active clients
 	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if (clients[i].m_fd != -1)
+		if (clients[i].m_fd != EMPTY_CLIENT)
 		{
 			close(clients[i].m_fd);
 			clients[i].m_fd = EMPTY_CLIENT;
@@ -332,15 +332,14 @@ void client_is_leaving(session * client_leaving)
 	char write_buffer[BUFFER_SIZE];
 	
 	//store it in the write_buffer
-	strncpy(write_buffer, ">> \"", BUFFER_SIZE);
+	strncpy(write_buffer, ">>", BUFFER_SIZE);
 	strncat(write_buffer, client_leaving->m_name, BUFFER_SIZE);
-	strncat(write_buffer, "\"", BUFFER_SIZE);
 	strncat(write_buffer, " has left the ChatRoom.", BUFFER_SIZE);
 	
 	//tell all active clients that aren't the one currently leaving
 	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if ((clients[i].m_fd != EMPTY_CLIENT) && (i != client_leaving->m_index))
+		if ((clients[i].m_fd != 1) && (i != client_leaving->m_index))
 		{
 			write(clients[i].m_fd, write_buffer, BUFFER_SIZE); 
 		}
@@ -354,15 +353,14 @@ void client_has_entered(session * client_joining)
 	char write_buffer[BUFFER_SIZE];
 	
 	//store it in the write_buffer
-	strncpy(write_buffer, ">> \"", BUFFER_SIZE);
+	strncpy(write_buffer, ">>", BUFFER_SIZE);
 	strncat(write_buffer, client_joining->m_name, BUFFER_SIZE);
-	strncat(write_buffer, "\"", BUFFER_SIZE);
 	strncat(write_buffer, " has entered the ChatRoom.", BUFFER_SIZE);
 	
 	//tell all active clients that aren't the one currently entering
 	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if ((clients[i].m_fd != EMPTY_CLIENT) && (i != client_joining->m_index))
+		if ((clients[i].m_fd != 1) && (i != client_joining->m_index))
 		{
 			write(clients[i].m_fd, write_buffer, BUFFER_SIZE);
 		}
