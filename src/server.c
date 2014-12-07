@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/socket.h>  
-#include <netinet/in.h>  
-#include <netdb.h>      
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
 #include <string.h>
@@ -15,21 +15,26 @@
 #define MAX_CLIENT 10
 #define BUFFER_SIZE 512
 
-//Two mutexes will be used, prevent any race conditions for read + write
+//Two mutexes are used, prevent any race conditions for read + write
 pthread_mutex_t accept_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t send_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct sockaddr_in server_addr;
 struct sockaddr_in client_addr;
 
-//socket, accept, and read
-int sd, ns, k;
+enum brain_helper
+{
+	EMPTY_CLIENT = -1
+};
 
-//length of socketaddr structure
+//socket, accept, and read
+int sd;// , ns, k;
+
+//length buffer
 int length;
 
-//when set to 1, aids in closing program
-int quit = 0;
+//Porgram exit flag
+int exit_flag = 0;
 
 ///////////////////////////////////////////
 /// @struct clients
@@ -46,10 +51,10 @@ typedef struct clients
 } session;
 
 //acts like the FD array mentioned in supplamental slides
-session clients[MAX_CLIENT]; 
+session clients[MAX_CLIENT];
 
 //list of functions used in server.c
-void default_clients();
+void init_clients();
 int find_opening_client_spot();
 void *client_handler(void * client);
 void send_to_clients(session * sender_index);
@@ -65,7 +70,7 @@ int main()
 	length = sizeof( client_addr );
 	
 	//initlize basic client info
-	default_clients();
+	init_clients();
 	
 	/* create a stream socket */
 	if ((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
@@ -102,18 +107,18 @@ int main()
 		exit(1);
 	}
 	
-	while(quit != 1)
+	while (exit_flag != 1)
 	{
 		int opening;
 		//only one thread in this section at a time, prevents race cond. for client opening, etc
 		pthread_mutex_lock(&accept_mutex);
 		
-		if ((opening = find_opening_client_spot()) != -1) //if there's an opening, otherwise check again
+		if ((opening = find_opening_client_spot()) != EMPTY_CLIENT)
 		{
 			//if there's an opening, accept the client
 			if((clients[opening].m_fd = accept(sd, (struct sockaddr*)&client_addr, &length)) == -1)
 			{
-				if (quit != 1) //prevents some extraneous output 
+				if (exit_flag != 1) //prevents some extraneous output 
 				{
 					perror("Server Error: Accepting issue"); 
 					exit(1);
@@ -137,32 +142,32 @@ int main()
 
 //initilizes some basic client info
 //m_index indicates the location of the client in the clients[] array
-//setting fd = -1 says that this client slot isn't active
-void default_clients()
+//
+void init_clients()
 {
-	int client;
-	for (client = 0; client < MAX_CLIENT; client++)
+	int i;
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		clients[client].m_index = client;
-		clients[client].m_fd = -1; // defualt, not set up yet
+		clients[i].m_index = i;
+		clients[i].m_fd = EMPTY_CLIENT;
 	}
 }
 
 //used to determien if there is an opening for a new client
 // -1 -> there is no opening
 // any number greater than -1 indicates the idnex in the clients[]
-  //that has an opening
+// that has an opening
 int find_opening_client_spot()
 {
-	int client;
-	for (client = 0; client < MAX_CLIENT; client++)
+	int i;
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if (clients[client].m_fd == -1) 
-		{//that index in the clients[] is not being utilized
-			return client;
+		if (clients[i].m_fd == EMPTY_CLIENT)
+		{
+			return i;
 		}
 	}
-	return -1; // currently at capacity
+	return EMPTY_CLIENT; // currently at capacity
 }
 
 void *client_handler(void * client) 
@@ -178,13 +183,13 @@ void *client_handler(void * client)
 	else
 	{
 		//print to server terminal that a new client has entered
-		printf(">>%s has joined the server\n", clients[client_index].m_name); 
+		printf(">> \"%s\" has joined the server\n", clients[client_index].m_name); 
 		//welcome the client to the server
 		write(clients[client_index].m_fd, ">>Welcome to the Server!", BUFFER_SIZE);
 		//tell all other clients that a new user has entered the server
 		client_has_entered(&clients[client_index]);
 	}
-	while (quit != 1 && clients[client_index].m_fd != -1) //while client is active....
+	while (exit_flag != 1 && clients[client_index].m_fd != EMPTY_CLIENT) //while client is active....
 	{
 		//read from the client, store in m_buffer
 		if (read(clients[client_index].m_fd, clients[client_index].m_buffer, BUFFER_SIZE) < 0)
@@ -194,15 +199,15 @@ void *client_handler(void * client)
 		}
 		else
 		{
-			//if the client is ready to quit...
-			if ((strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/quit") == 0) || (strcmp(clients[client_index].m_buffer, "/part") == 0))
+			//if the client is ready to exit...
+			if ((strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/exit") == 0) || (strcmp(clients[client_index].m_buffer, "/part") == 0))
 			{
-				//send the client the quit directive, helps client cleanly leave
-				write(clients[client_index].m_fd, "/directive -> quit", BUFFER_SIZE);
+				//send the client the exit directive, helps client cleanly leave
+				write(clients[client_index].m_fd, "/directive -> exit", BUFFER_SIZE);
 				//tell all other clients that the user is leaving the server
 				client_is_leaving(&clients[client_index]);
 				//free up that client's spot in the clients[] array
-				clients[client_index].m_fd = -1;
+				clients[client_index].m_fd = EMPTY_CLIENT;
 			}
 			else
 			{
@@ -215,7 +220,7 @@ void *client_handler(void * client)
 	}
 	//this code will be executed once the user has indicated that they are leaving
 	//print to the server terminal that the client is leaving
-	printf(">>%s has Quit\n", clients[client_index].m_name);
+	printf(">>%s has exit\n", clients[client_index].m_name);
 	//close that socket used for that client
 	close(clients[client_index].m_fd);
 	//end thread's execution
@@ -230,9 +235,9 @@ void *client_handler(void * client)
   //to all other users
 void send_to_clients(session * sender)
 {
-	if (quit != 1) // prevents some bogus output
+	int i;
+	if (exit_flag != 1) // prevents some bogus output
 	{
-		int client;
 		char write_buffer[BUFFER_SIZE];
 		
 		//first format the message, name> message
@@ -244,11 +249,11 @@ void send_to_clients(session * sender)
 		printf("%s\n", write_buffer);
 		
 		//send message to all active clients except the sender
-		for (client = 0; client < MAX_CLIENT; client++)
+		for (i= 0; i < MAX_CLIENT; i++)
 		{
-			if ((clients[client].m_fd != 1) && (client != sender->m_index))
+			if ((clients[i].m_fd != EMPTY_CLIENT) && (i != sender->m_index))
 			{
-				write(clients[client].m_fd, write_buffer, BUFFER_SIZE);
+				write(clients[i].m_fd, write_buffer, BUFFER_SIZE);
 			}
 		}
 	}
@@ -259,25 +264,24 @@ void send_to_clients(session * sender)
 //closes all connections, and ends the server
 void signalhandler(int sig)
 {
+	int i=0;
 	char msg[BUFFER_SIZE];
 	time_t start_time, cur_time;//used to wait for 10 seconds
 	
 	strncpy(msg, ">>The Server will shut down in 10 seconds.", BUFFER_SIZE);
 	printf("\n%s\n", msg);
 	fflush( stdout ); //ensures that message is printed to server terminal
-	
-	int client;
-	
+		
 	//tell all active clients that server is shutting down
-	for (client = 0; client < MAX_CLIENT; client++)
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if (clients[client].m_fd != -1)
+		if (clients[i].m_fd != EMPTY_CLIENT)
 		{
-			write(clients[client].m_fd, msg, BUFFER_SIZE);
+			write(clients[i].m_fd, msg, BUFFER_SIZE);
 		}
 	}
 	
-	//wait 10 seconds, allows user to quit manually if desired
+	//wait 10 seconds, allows user to exit manually if desired
 	time(&start_time);
 	do
 	{
@@ -285,25 +289,25 @@ void signalhandler(int sig)
 	}
 	while((cur_time - start_time) < 10);
 	
-	strncpy(msg, "/directive -> quit", BUFFER_SIZE);//the quit direcitve
-	//send all active clients the quit directive
-	for (client = 0; client < MAX_CLIENT; client++)
+	strncpy(msg, "/directive -> exit", BUFFER_SIZE);//the exit direcitve
+	//send all active clients the exit directive
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if (clients[client].m_fd != -1)
+		if (clients[i].m_fd != EMPTY_CLIENT)
 		{
-			write(clients[client].m_fd, msg, BUFFER_SIZE);
+			write(clients[i].m_fd, msg, BUFFER_SIZE);
 		}
 	}
 
 	//close connecton to all active clients
 	//stop threads for all active clients
-	for (client = 0; client < MAX_CLIENT; client++)
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if (clients[client].m_fd != -1)
+		if (clients[i].m_fd != -1)
 		{
-			clients[client].m_fd = -1;
-			close(clients[client].m_fd);
-			if (pthread_cancel(clients[client].m_thread) !=0)
+			close(clients[i].m_fd);
+			clients[i].m_fd = EMPTY_CLIENT;
+			if (pthread_cancel(clients[i].m_thread) !=0)
 			{
 				perror("Issue ending thread");
 				exit(1);
@@ -311,33 +315,34 @@ void signalhandler(int sig)
 		}
 	}
 	
-	quit = 1;
+	exit_flag = 1;
 	
 	//close all connections.. free up server address
-	close(k);
-	close(ns);
+	//close(k);
+	//close(ns);
 	close(sd);
 	unlink(server_addr.sin_addr);
 	
 }
 
-//this function tells all active clients that 'client_leaving' has quit
+//this function tells all active clients that 'client_leaving' has exit
 void client_is_leaving(session * client_leaving)
 {
-	int client;
+	int i;
 	char write_buffer[BUFFER_SIZE];
 	
 	//store it in the write_buffer
-	strncpy(write_buffer, ">>", BUFFER_SIZE);
+	strncpy(write_buffer, ">> \"", BUFFER_SIZE);
 	strncat(write_buffer, client_leaving->m_name, BUFFER_SIZE);
-	strncat(write_buffer, " is leaving the server.", BUFFER_SIZE);
+	strncat(write_buffer, "\"", BUFFER_SIZE);
+	strncat(write_buffer, " has left the ChatRoom.", BUFFER_SIZE);
 	
 	//tell all active clients that aren't the one currently leaving
-	for (client = 0; client < MAX_CLIENT; client++)
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if ((clients[client].m_fd != 1) && (client != client_leaving->m_index))
+		if ((clients[i].m_fd != EMPTY_CLIENT) && (i != client_leaving->m_index))
 		{
-			write(clients[client].m_fd, write_buffer, BUFFER_SIZE); 
+			write(clients[i].m_fd, write_buffer, BUFFER_SIZE); 
 		}
 	}
 }
@@ -345,20 +350,21 @@ void client_is_leaving(session * client_leaving)
 //this function tells all active clients that 'client_joining' has entered the server
 void client_has_entered(session * client_joining)
 {
-	int client;
+	int i;
 	char write_buffer[BUFFER_SIZE];
 	
 	//store it in the write_buffer
-	strncpy(write_buffer, ">>", BUFFER_SIZE);
+	strncpy(write_buffer, ">> \"", BUFFER_SIZE);
 	strncat(write_buffer, client_joining->m_name, BUFFER_SIZE);
-	strncat(write_buffer, " has entered the server.", BUFFER_SIZE);
+	strncat(write_buffer, "\"", BUFFER_SIZE);
+	strncat(write_buffer, " has entered the ChatRoom.", BUFFER_SIZE);
 	
 	//tell all active clients that aren't the one currently entering
-	for (client = 0; client < MAX_CLIENT; client++)
+	for (i = 0; i < MAX_CLIENT; i++)
 	{
-		if ((clients[client].m_fd != 1) && (client != client_joining->m_index))
+		if ((clients[i].m_fd != EMPTY_CLIENT) && (i != client_joining->m_index))
 		{
-			write(clients[client].m_fd, write_buffer, BUFFER_SIZE);
+			write(clients[i].m_fd, write_buffer, BUFFER_SIZE);
 		}
 	}
 }
