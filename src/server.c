@@ -1,6 +1,6 @@
 /************************************************************************/
-/*	 PROMGRAMMER NAMES: Neshat Osmani and Xiao Deng						*/				
-/*   PROGRAM NAME: server1.c  (works with client.c)                     */
+/*   PROMGRAMMER NAMES: Neshat Osmani and Xiao Deng						*/				
+/*   PROGRAM NAME: server.c  (works with client.c)                     */
 /*                                                                      */
 /*   Server creates a socket to listen for the connection from Client   */
 /*   When the communication established, Server echoes data from Client */
